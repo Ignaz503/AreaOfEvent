@@ -1,0 +1,222 @@
+﻿@using AreaOfEvent.Client.Components.Rendering
+@using AreaOfEvent.Client.Components.Rendering.Shapes;
+@using AreaOfEvent.Client.Components.Radars.Behaviours;
+@using AreaOfEvent.Client.Services.GeoLocation;
+@using AreaOfEvent.Shared.GeoLocation;
+@using AreaOfEvent.Shared.Collections.Observables;
+@using AreaOfEvent.Shared.Mathematics;
+
+@typeparam TMarkerData
+@inject IGeoLocationService geoLocService;
+
+<SceneView @ref="sceneView"
+           Width="@Width"
+           Height="@Height"
+           BackgroundColor="@BackgroundColor"
+           SceneInitializer="InitializeScene"
+           id="radarView"></SceneView>
+<Slider Max="@MaxDistanceKM"
+        Min="@MinDistanceKM"
+        Step="@SliderStepSize"
+        Value="@HalfMinMaxDistance" @ref="slid"></Slider>
+
+@code {
+  const string UserLocationTrackerName = "UserLocationTracker";
+
+  [Parameter] public long Width { get; set; }
+  [Parameter] public long Height { get; set; }
+  [Parameter] public string BackgroundColor { get; set; }
+  [Parameter] public int RadarCircles { get; set; }
+  [Parameter] public string BGStrokeStyle { get; set; }
+  [Parameter] public double UserLocationUpdateFrequencyMS { get; set; }
+  [Parameter] public EventCallback<TMarkerData> MarkerInteractionCallback { get; set; }
+  [Parameter] public ObservableCollection<TMarkerData> MarkerSource { get; set; }
+  [Parameter] public double MaxDistanceKM { get; set; }
+  [Parameter] public double MinDistanceKM { get; set; }
+  [Parameter] public double SliderStepSize { get; set; } = 1;
+
+  RadarSettings settings = new();
+  SceneView sceneView;
+  Slider slid;
+
+  double MaxDistanceMeters => slid.Value * 1000;
+
+  //{ MarkerRadius = 10, StrokeStyle = "#FFFFFF", FillStyle = "#B55400" }
+  SolidCircle markerCircle = new SolidCircle(
+              fillStyle:"#B55400",
+              strokeStyle:"#FFFFFF",
+              radius: 10);
+
+  double HalfMinMaxDistance => Maths.Lerp( MinDistanceKM, MaxDistanceKM, 0.5 );
+
+  public async Task InitializeScene( Scene s )
+  {
+    MarkerSource.OnCollectionChanged += OnMarkerSourceChanged;
+
+    AddBackgroundCircles( s );
+    AddRotatingLine( s );
+    var userLoc = await AddUserLocationTracker( s );
+    InitializeMarkers( s, userLoc );
+  }
+
+  void AddBackgroundCircles( Scene s )
+  {
+    s.CreateSceneObject( id => new RadarBackground( settings, new( () => MinDistanceKM * 1000 ), new( () => MaxDistanceMeters ), RadarCircles, BGStrokeStyle, s ) { ID = id } );
+  }
+
+  void AddRotatingLine( Scene scene )
+  {
+    var obj = scene.CreateSceneObject();
+
+    obj.AddComponent( new CenterInScene( obj ) );
+
+    Line line = new(){StrokeStyle = BGStrokeStyle};
+
+    obj.AddComponent( new ShapeRenderer( line, obj ) );
+    obj.AddComponent( new RadarLineRotator( line, settings, obj ) { DegreePerSecond = 15 } );
+  }
+
+  void InitializeMarkers( Scene scene, UserLocationTracker userLoc )
+  {
+    foreach (var data in MarkerSource)
+    {
+      CreateNewMarker( scene, data, userLoc );
+    }
+  }
+
+  async Task<UserLocationTracker> AddUserLocationTracker( Scene s )
+  {
+    var initLoc = await geoLocService.GetUserGeoLocationAsync();
+
+    var loc = new Location();
+
+    if (initLoc.IsValid)
+    {
+      loc.Latitude = initLoc.Latitude;
+      loc.Longitude = initLoc.Longitude;
+    }
+
+    var obj = s.CreateSceneObject();
+    obj.Name = UserLocationTrackerName;
+    return obj.AddComponent( new UserLocationTracker( loc, UserLocationUpdateFrequencyMS, geoLocService, obj ) );
+  }
+
+  /*
+    ClearedCollectionChangedEventArgs<T>
+
+    RemovedRangeCollectionChangedEventArgs<T>
+
+    AddItemCollectionChangedEventArgs<T>
+
+     AddRangeCollectionChangedEventArgs<T>
+
+    InsertAtCollectionChangedEventArgs<T>
+
+    RemovedItemCollectionChangedEventArgs<T>
+  */
+
+  void OnMarkerSourceChanged( object sender, CollectionChangedEventArgs<TMarkerData> args )
+  {
+    Console.WriteLine( $"Marker source changed, {args.GetType().Name}" );
+    switch (args)
+    {
+      case ClearedCollectionChangedEventArgs<TMarkerData> cleardArgs:
+        sceneView.Scene.RemoveAllObjectsWithComponent<LocationMarker<TMarkerData>>();
+        break;
+      case RemovedRangeCollectionChangedEventArgs<TMarkerData> removedRangeArgs:
+        HandleMarkerRemoveRange( removedRangeArgs );
+        break;
+      case AddItemCollectionChangedEventArgs<TMarkerData> addItemArgs:
+        HandleMarkerAdded( MarkerSource[addItemArgs.ChangeIdx] );
+        break;
+      case AddRangeCollectionChangedEventArgs<TMarkerData> addRangeArgs:
+        HandleMarkersAdded( addRangeArgs );
+        break;
+      case RemovedItemCollectionChangedEventArgs<TMarkerData> removeItemArgs:
+        HandleMarkerRemove( removeItemArgs.ItemRemoved );
+        break;
+    }
+  }
+
+  void HandleMarkersAdded( AddRangeCollectionChangedEventArgs<TMarkerData> args )
+  {
+    for (int i = args.StartChangeIdx; i <= args.EndChangeIdx; i++)
+    {
+      HandleMarkerAdded( MarkerSource[i] );
+    }
+  }
+
+  void HandleMarkerAdded( TMarkerData data )
+  {
+    var userLocTracker = sceneView.Scene.FindObjectByName(UserLocationTrackerName);
+    if (userLocTracker == null)
+    {
+      Console.WriteLine( $"No object with name {UserLocationTrackerName}" );
+      return;
+    }
+
+    var trackerComponent = userLocTracker.GetComponent<UserLocationTracker>();
+    if (trackerComponent == null)
+    {
+      Console.WriteLine( "scene object does not have User location tracker component" );
+      return;
+    }
+
+    CreateNewMarker( sceneView.Scene, data, trackerComponent );
+
+  }
+
+  void CreateNewMarker( Scene scene, TMarkerData data, UserLocationTracker tracker )
+  {
+    var newObj = scene.CreateSceneObject();
+    newObj.AddComponent( new LocationMarker<TMarkerData>(
+            data: data,
+            callback: MarkerInteractionCallback,
+            userLocation: tracker,
+            maxDistance: new( () => MaxDistanceMeters ),
+            settings: settings,
+            shape: markerCircle,
+            containingObject: newObj ) );
+  }
+
+  void HandleMarkerRemove( TMarkerData data )
+  {
+    SceneObject toRemove = null;
+    foreach (var obj in sceneView.Scene.FindObjectsWithComponent<LocationMarker<TMarkerData>>())
+    {
+      var marker = obj.GetComponent<LocationMarker<TMarkerData>>();
+      if (marker != null)
+      {
+        if (marker.DataEquals( data ))
+        {
+          toRemove = obj;
+          break;
+          ;
+        }
+      }
+    }
+    sceneView.Scene.RemoveSceneObject( toRemove );
+  }
+
+  void HandleMarkerRemoveRange( RemovedRangeCollectionChangedEventArgs<TMarkerData> args )
+  {
+    var toRemove = new List<SceneObject>();
+
+    foreach (var obj in sceneView.Scene.FindObjectsWithComponent<LocationMarker<TMarkerData>>())
+    {
+      var markerComponent = obj.GetComponent<LocationMarker<TMarkerData>>();
+      if (markerComponent != null)
+      {
+        if (!MarkerSource.Contains( markerComponent.Data ))
+        {
+          toRemove.Add( obj );
+        }
+      }
+    }
+
+    foreach (var sceneObj in toRemove)
+      sceneView.Scene.RemoveSceneObject( sceneObj );
+
+  }
+
+}

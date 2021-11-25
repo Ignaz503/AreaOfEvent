@@ -1,0 +1,79 @@
+﻿@using Blazor.Extensions.Canvas.Canvas2D;
+@using Blazor.Extensions;
+
+@implements IDisposable
+@inject IJSRuntime jsr;
+
+<div @attributes="ContainerAttributes">
+  <BECanvas Width="@Width" Height="@Height" @ref="CanvasRef"></BECanvas>
+</div>
+
+@code {
+
+  [Parameter] public EventCallback<Scene> SceneInitializer { get; set; }
+  [Parameter] public object BackgroundColor { get; set; }
+
+  [Parameter] public long Width { get; set; }
+  [Parameter] public long Height { get; set; }
+
+  [Parameter( CaptureUnmatchedValues = true )]
+  public Dictionary<string, object> ContainerAttributes { get; set; }
+
+  private Canvas2DContext ctx;
+  protected BECanvasComponent CanvasRef;
+
+  public Scene Scene { get; private set; }
+  DotNetObjectReference<SceneView> objRef;
+
+  string containerID
+  {
+    get
+    {
+      if (!ContainerAttributes.ContainsKey( "id" ))
+      {
+        ContainerAttributes.Add( "id", Guid.NewGuid().ToString() );
+      }
+      return ContainerAttributes["id"] as string;
+    }
+  }
+
+  protected async override Task OnAfterRenderAsync( bool firstRender )
+  {
+    if (firstRender)
+    {
+      objRef = DotNetObjectReference.Create( this );
+
+      await jsr.InvokeAsync<object>( "initRenderJS", containerID, objRef );
+
+      this.ctx = await CanvasRef.CreateCanvas2DAsync();
+
+      Scene = new( Width, Height ) { BackgroundColor = BackgroundColor };
+      await SceneInitializer.InvokeAsync( Scene );
+    }
+
+    await base.OnAfterRenderAsync( firstRender );
+  }
+
+  [JSInvokable]
+  public async ValueTask Run( float timeStamp, int width, int height )
+  {
+    Width = width;
+    Height = height;
+
+    await Scene.Update( timeStamp, jsr, width, height );
+
+    await Scene.Render( CanvasRef, ctx, jsr );
+  }
+
+  [JSInvokable]
+  public async ValueTask OnClick( int mouseX, int mouseY )
+  {
+    await Scene.OnClick( new() { MouseX = mouseX, MouseY = mouseY } );
+  }
+
+  public void Dispose()
+  {
+    objRef.Dispose();
+    Scene.Dispose();
+  }
+}

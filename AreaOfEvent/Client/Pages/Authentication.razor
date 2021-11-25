@@ -1,0 +1,12 @@
+﻿@page "/authentication/{action}"
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using AreaOfEvent.Client.Components.Authentication
+<RemoteAuthenticatorView Action="@Action" >
+  <LogOutSucceeded>
+    <LoggedOutView/>
+  </LogOutSucceeded>
+</RemoteAuthenticatorView>
+
+@code{
+    [Parameter] public string Action { get; set; }
+}

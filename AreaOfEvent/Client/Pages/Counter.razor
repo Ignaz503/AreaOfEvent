@@ -1,0 +1,133 @@
+﻿@page "/counter"
+
+@using AreaOfEvent.Client.Services.GeoLocation;
+@using AreaOfEvent.Client.Services.Navigation;
+@using AreaOfEvent.Client.Components;
+@using AreaOfEvent.Shared.GeoLocation;
+@using AreaOfEvent.Client.Components.Radars;
+@using AreaOfEvent.Client.Components.Modals;
+@using AreaOfEvent.Shared.Collections.Observables;
+@using AreaOfEvent.Shared.Mathematics;
+
+@inject IGeoLocationService locationService;
+@inject INavigationService navigationService;
+
+<h1>Counter</h1>
+
+<p>Current count: @currentCount</p>
+
+<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+<button class="btn btn-primary" @onclick="GetLocation">Where am I Log</button>
+<button class="btn btn-primary" @onclick="ShowMark">Where am I Mark</button>
+<button class="btn btn-primary" @onclick="AddRandomMarker">Add Random Marker</button>
+
+
+<MapView @ref="mapView"
+         InitialLatitude="@initLat"
+         InitialLongitude="@initLong"
+         OnMapInteractCallback="OnMapClick"
+         id="mapid"
+         style="height: 480px"></MapView>
+
+<Radar TMarkerData="TestLocateable"
+       Width="600"
+       Height="400"
+       BackgroundColor="#000000"
+       BGStrokeStyle="#A7D129"
+       RadarCircles="5"
+       UserLocationUpdateFrequencyMS="0"
+       MarkerInteractionCallback="OnRadarMarkerClicked"
+       MarkerSource="@markers"
+       MaxDistanceKM="@maxDistance"
+       MinDistanceKM="@minDistance"
+       SliderStepSize="1" />
+
+@code {
+
+  [CascadingParameter] public IModalService Modal { get; set; }
+
+  private int currentCount = 0;
+
+  MapView mapView;
+
+  private double initLat = 51.505;
+  private double initLong = -0.09;
+
+  Slider slid;
+  private double maxDistance = 12000;
+  private double minDistance = 5;
+
+  private ObservableCollection<TestLocateable> markers  = new();
+
+  System.Random rng = new((int)DateTime.Now.Ticks);
+
+
+  private void IncrementCount()
+  {
+    currentCount++;
+  }
+
+  private async Task GetLocation()
+  {
+    var loc = await locationService.GetUserGeoLocationAsync();
+
+    Console.WriteLine( $"You are at Lat: {loc.Latitude}, Long: {loc.Longitude}" );
+  }
+
+  private async Task ShowMark()
+  {
+    var loc = await locationService.GetUserGeoLocationAsync();
+
+    await navigationService.ShowMark( loc.Latitude, loc.Longitude );
+  }
+
+  private async Task OnMapClick( Location loc )
+  {
+    Console.WriteLine( "On Map Click from counter" );
+    await mapView.AddMarkerAt( loc );
+  }
+
+  private async Task OnRadarMarkerClicked( TestLocateable data )
+  {
+    var options = new ModalOptions{ UseCustomLayout = true};
+    var parameters = new ModalParameters();
+    parameters.Add( nameof( MarkerInteractionTest<TestLocateable>.Data ), data );
+
+    var modalWindow = Modal.Show<MarkerInteractionTest<TestLocateable>>("Test",parameters,options);
+    var res = await modalWindow.Result;
+
+    if (res.Data is bool val)
+    {
+      if (val)
+      {
+        markers.Remove( data );
+      }
+    }
+  }
+
+  private Task AddRandomMarker()
+  {
+    if (markers.Count >= 10)
+      return Task.CompletedTask;
+    var loc = Location.GetRandom(rng);
+
+    markers.Add( new() { GeoLocation = loc } );
+
+    return Task.CompletedTask;
+  }
+
+
+  private Task PrintSliderValue()
+  {
+    Console.WriteLine( slid.Value );
+    return Task.CompletedTask;
+  }
+
+  private Task SetRandomValue()
+  {
+    slid.UpdateValue( Maths.Lerp( 5, 50, rng.NextDouble() ) );
+    //StateHasChanged();
+    return Task.CompletedTask;
+  }
+
+}

@@ -1,0 +1,83 @@
+﻿@using AreaOfEvent.Shared.GeoLocation;
+
+@implements IAsyncDisposable
+@inject IJSRuntime jsr
+
+<div @attributes="ContainerAttributes"></div>
+
+@code {
+
+  [Parameter] public EventCallback<Location> OnMapInteractCallback { get; set; }
+
+
+  [Parameter] public double InitialLatitude { get; set; }
+  [Parameter] public double InitialLongitude { get; set; }
+
+  [Parameter] public bool MarkInitialLocation { get; set; } = false;
+
+  [Parameter( CaptureUnmatchedValues = true )]
+  public Dictionary<string, object> ContainerAttributes { get; set; }
+
+  string containerID
+  {
+    get
+    {
+      if (!ContainerAttributes.ContainsKey( "id" ))
+      {
+        ContainerAttributes.Add( "id", Guid.NewGuid().ToString() );
+      }
+      return ContainerAttributes["id"] as string;
+    }
+  }
+
+  DotNetObjectReference<MapView> objRef;
+
+  protected async override Task OnAfterRenderAsync( bool firstRender )
+  {
+    if (firstRender)
+    {
+      objRef = DotNetObjectReference.Create( this );
+      Console.WriteLine( $"create at ID: {containerID}" );
+      await jsr.InvokeVoidAsync( "createMap", objRef, containerID, InitialLatitude, InitialLongitude );
+
+      if (MarkInitialLocation)
+        await AddMarkerAt( InitialLatitude, InitialLongitude );
+
+      await base.OnAfterRenderAsync( firstRender );
+    }
+  }
+
+  [JSInvokable]
+  public async ValueTask OnMapInteract( double lat, double lon )
+  {
+    await OnMapInteractCallback.InvokeAsync( new Location() { Latitude = lat, Longitude = lon } );
+  }
+
+  public async ValueTask AddMarkerAt( Location location )
+  {
+    Console.WriteLine( "Adding marker c#" );
+    await jsr.InvokeVoidAsync( "addMarkerToMap", containerID, location.Latitude, location.Longitude );
+  }
+
+  public async ValueTask AddMarkerAt( double lat, double lng )
+  {
+    Console.WriteLine( "Adding marker c#" );
+    await jsr.InvokeVoidAsync( "addMarkerToMap", containerID, lat, lng );
+  }
+
+  public async ValueTask SetView( Location location )
+  {
+    await jsr.InvokeVoidAsync( "setViewOfMap", containerID, location.Latitude, location.Longitude );
+  }
+
+  public async ValueTask SetView( double lat, double lng )
+  {
+    await jsr.InvokeVoidAsync( "setViewOfMap", containerID, lat, lng );
+  }
+
+  public async System.Threading.Tasks.ValueTask DisposeAsync()
+  {
+    await jsr.InvokeVoidAsync( "disposeMap", containerID );
+    objRef?.Dispose();
+  }
+}

@@ -1,0 +1,48 @@
+﻿<div class="row">
+  <div class="col-md-auto">
+    <div class="align-middle">
+      <input type="range" class="form-range"
+             min="@Min" max="@Max" step="@Step"
+             @bind-value="@Value" @bind-value:event="oninput" />
+    </div>
+  </div>
+  <div class="col-md-auto">
+    <input type="number" class="form-control"
+           min="@Min" max="@Max" step="@Step"
+           @bind-value="Value" />
+  </div>
+</div>
+
+@code {
+  [Parameter] public double Min { get; set; }
+  [Parameter] public double Max { get; set; }
+  double value;
+  [Parameter]
+  public double Value
+  {
+    get => value;
+    set
+    {
+      if (value > Max || value < Min)
+      {
+        UpdateValue( Math.Clamp( value, Min, Max ) );
+        return;
+      }
+      this.value = value;
+    }
+  }
+  [Parameter] public double Step { get; set; }
+
+  protected override Task OnInitializedAsync()
+  {
+    if (Value > Max || Value < Min)
+      UpdateValue( Math.Clamp( Value, Min, Max ) );
+    return base.OnInitializedAsync();
+  }
+
+  public void UpdateValue( double newVal )
+  {
+    this.Value = newVal;
+    StateHasChanged();
+  }
+}
